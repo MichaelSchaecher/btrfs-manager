@@ -1,0 +1,115 @@
+#!/bin/env bash
+
+# btrfs-manager - A simple script to manage btrfs snapshots and subvolumes on Debian/Ubuntu systems.
+# Author:
+#   * Michael Schaecher <mschaecher78@gmail.com>
+
+# Copyright (c) 2023 by Michael Schaecher under GNU MIT License
+
+# The concept of this script is to create a snapshot of the subvolume given as parameter, using either
+# the default settings for naming, lifespan, tagging and description, or using custom settings given as
+# parameters. This script will not handle the deletion of snapshots, leave that to btrfs-scrub
+
+# Each action is logged to /var/log/btrfs-manager.log this includes the date, time, action, subvolume and
+# snapshot name. The log should also include the exit code of the btrfs command.
+
+# The script is intended to be run as root, but will check for root privileges and exit if not run as root.
+
+# Each command needs to be contained in a function, so that it can be called from the main function.
+
+
+# Commands:
+#   * create  - Create a snapshot of the subvolume given as parameter.
+#   * restore - Restore a snapshot of the subvolume given as parameter.
+#   * list    - List all snapshots of the subvolume given as parameter.
+#   * add     - Add a snapshots to grub menu.
+#   * help    - Display help text.
+#   * version - Display version information.
+
+# Options:
+#   * -t, --tag - Tag the snapshot with a custom tag.
+#   * -d, --description - Add a description to the snapshot.
+#   * -l, --lifespan - Set the lifespan of the snapshot.
+#   * -s, --subvolume - Set the subvolume to be managed by btrfs-manager.
+#   * -k, --keep - Set the number of snapshots to keep.
+#   * -p, --prefix - Set the prefix for the snapshot name (1.e name) default to hostname-subvolume_date-time.
+#   * -h, --help - Display help text for a given command.
+
+# Use function to check if script is run as root use logical OR and send error message to error_message.
+function check_root() { test $UID -eq 0 || error_message "You need to be root to run this script." ; }
+
+# Error message function, takes a string as parameter and sends it to stderr and records it in the log.
+# exit code 1 and include what line the error occured on.
+function error_message() { echo -e "Error: $1" >&2; echo -e "- $(date)  - Error: ${*}" >> /var/log/btrfs-manager.log; exit 1; }
+
+# Create snapshot function, takes a subvolume as parameter and creates a snapshot of it.
+# If no subvolume is given as parameter, use the default root subvolume.
+function create_snapshot() {
+
+    :
+
+}
+
+# Exit on errors and pipe failures
+set -o errexit -o pipefail
+
+# tarp errors
+trap error_message ERR
+
+progName="btrfs-manager"
+verCode="0.1"
+verDate="2023-11-04"
+verAuthor="Michael Schaecher"
+
+verInfo="${progName} version ${verCode} (${verDate}) by ${verAuthor}"
+
+helpInfo="$(cat <<EOF
+Usage: btrfs-manager [COMMAND] [OPTIONS]
+Usage: btrfs-manager [COMMAND] [OPTIONS] [SUBVOLUME]
+
+Commands:
+    create              Create a snapshot of the subvolume given as parameter: Run with -h for more information.
+    restore             Restore a snapshot of the subvolume given as parameter: Run with -h for more information.
+    list                List all snapshots of the subvolume given as parameter.
+    add                 Add a snapshots to grub menu.
+    help                Display help text.
+    version             Display version information.
+
+Options:
+    -t, --tag           Tag the snapshot with a custom tag.
+    -d, --description   Add a description to the snapshot.
+    -l, --lifespan      Set the lifespan of the snapshot.
+    -s, --subvolume     Set the subvolume to be managed by btrfs-manager.
+    -k, --keep          Set the number of snapshots to keep.
+    -p, --prefix        Set the prefix for the snapshot name (1.e name) defaults to hostname-subvolume_date-time.
+    -h, --help          Display help text for a given command.
+
+${verInfo}
+EOF
+)"
+
+# Source config file
+source /etc/btrfs-manager.conf
+
+# Use while loop to process all commands, options with arguments and options without within the case statement.
+# After case statement use check if next parameter is empty, if not empty shift otherwise break.
+while true ; do case "${1}" in
+    "create"                ) check_root ; create_snapshot "${@}" ;;
+    "restore"               ) check_root ; restore_snapshot "${@}" ;;
+    "list"                  ) check_root ; list_snapshots "${@}" ;;
+    "add"                   )
+        check_root
+
+        # Check if btrfs-menu is installed in /etc/grub.d/50add-btrfs-menu
+        if [ ! -f /etc/grub.d/50add-btrfs-menu ]; then
+            error_message "50_btrfs-menu is not installed, please install it first!" " line: " "${LINENO}"
+        else
+            echo "RUNNING: update-grub" ; update-grub
+        fi
+
+     ;;
+    "help"                  ) echo "${helpInfo}" ; exit 0 ;;
+    "version"               ) echo "${verInfo}" ; exit 0 ;;
+esac ; if test -n "${2}" ; then shift ; else break ; fi ; done
+
+exit 0
