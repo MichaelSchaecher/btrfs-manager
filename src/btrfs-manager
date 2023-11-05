@@ -50,6 +50,11 @@ function log_message() { echo -e "- $(date)  - ${*}" >> /var/log/btrfs-manager.l
 # If no subvolume is given as parameter, use the default root subvolume.
 function create_snapshot() {
 
+    # The end_date variable is used by the date command calculate a give date, it is a global variable,
+    # but shellcheck complains. Disabling the warning well also disable more useful
+    # warnings, so it is better to declare the variable.
+    declare -i end_date
+
     # Set the variables within the function to local, so that they are not global.
     local subvolume prefix lifespan description tag date_time dir_name keep read_only
 
