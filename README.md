@@ -83,8 +83,8 @@ $EDITOR /etc/btrfs-manager.conf
 | :--- | :--- | :--- |
 | `SNAPSHOT_LOCATION` | The location where snapshots are saved. | `/.snapshots` |
 | `SNAPSHOT_LIFETIME` | The lifetime of snapshots in days. | `5` (in Days) |
-| `SNAPSHOT_PREFIX` | The prefix of the snapshot name. | `hostname-<path>` |
-| `SNAPSHOT_FORMAT` | The date format of the snapshot name. | `%Y-%m-%d_%H%M-%S` |
+| `SNAPSHOT_HOSTNAME` | The prefix of the snapshot name. | `hostname` |
+| `SNAPSHOT_FORMAT` | The date format of the snapshot name. | `%Y%m%d-%H%M%S` |
 | `SNAPSHOT_LIMIT` | The number of snapshots to keep. | `15` |
 
 The rest of the settings are done with flags when running the application; both the **btrfs-manager** and **btrfs-scrub** scriptt.

@@ -39,14 +39,171 @@
 function check_root() { test $UID -eq 0 || error_message "You need to be root to run this script." ; }
 
 # Error message function, takes a string as parameter and sends it to stderr and records it in the log.
-# exit code 1 and include what line the error occured on.
-function error_message() { echo -e "Error: $1" >&2; echo -e "- $(date)  - Error: ${*}" >> /var/log/btrfs-manager.log; exit 1; }
+# exit code 1 and include what line the error occurred on.
+function error_message() { echo -e "Error: ${*}" >&2 ; echo -e "- $(date)  - Error: ${*}" >> /var/log/btrfs-manager.log; exit 1; }
+
+# This function is used to append to the log file, takes a string as parameter and appends it to the log file.
+# Exit cleaning with exit code 0.
+function log_message() { echo -e "- $(date)  - ${*}" >> /var/log/btrfs-manager.log ; }
 
 # Create snapshot function, takes a subvolume as parameter and creates a snapshot of it.
 # If no subvolume is given as parameter, use the default root subvolume.
 function create_snapshot() {
 
-    :
+    # Set the variables within the function to local, so that they are not global.
+    local subvolume prefix lifespan description tag date_time dir_name keep read_only
+
+    shift
+
+    # Source the config file in either src/etc/btrfs-manager.conf or /etc/btrfs-manager.conf
+    # If the config file does not exist, exit with error message.
+    source /etc/btrfs-manager.conf || source src/etc/btrfs-manager.conf ||
+        error_message "Config file not found, please reinstall btrfs-manager." " line: " "${LINENO}"
+
+    date_time="${SNAPSHOT_FORMAT}"
+
+    # Need to help text for create command
+    helpCreateInfo="$(cat <<EOF
+Usage: btrfs-manager create [OPTIONS]
+Usage: btrfs-manager create [OPTIONS] [SUBVOLUME] [OPTIONS]
+
+The following options are available for the create command: Please note that the create command
+requires root privileges to function.
+
+Options:
+    -t, --tag           Tag the snapshot with one of the following tags:
+                        [S = Standard, A = Automatic, D = Daily, W = Weekly, M = Monthly, Y = Yearly]
+
+    -d, --description   Add a description to the snapshot.
+    -l, --lifespan      Set the lifespan of the snapshot.
+    -k, --keep          Keep the snapshot indefinitely.
+    -r, --readonly      Set the snapshot to read only.
+    -s, --subvolume     Set the subvolume to be managed by btrfs-manager.
+    -p, --prefix        Set the prefix for the snapshot name (1.e name) defaults to hostname-subvolume_date-time.
+    -h, --help          Display help text for a given command.
+
+${verInfo}
+EOF
+)"
+
+    if test "${1}" = "-h" || test "${1}" = "--help" ; then echo "${helpCreateInfo}" ; exit 0 ; fi
+
+    # Check if root access is given, if not exit with error message.
+    check_root
+
+    # Using while loop to process all options with arguments and options without within the case statement
+    # to set the variables for the snapshot name, lifespan, description and tag, if no options are given
+    # use the default values from the config file.
+    while true ; do case "${1}" in
+        "-t"|"--tag"            )
+
+            # Make sure that the symbol is `-` and not `--` for the argument is not present or empty.
+            # If the argument is empty or not present, exit with error message.
+            if test -z "${2}" || test "${2:0:1}" = "-" ; then error_message "No tag given." " line: " "${LINENO}" ; fi
+            tag="${2}"
+
+            # Check if the tag is one of the following:
+            # [M = Manual, A = Automatic, D = Daily, W = Weekly, M = Monthly, Y = Yearly]
+            # If the tag is not one of the above, exit with error message.
+            case "${tag}" in
+                "S"|"A"|"D"|"W"|"M"|"Y" ) ;;
+                *                       )
+                    error_message "Unknown tag: ${tag} - please use "S, A, D, W, M, Y" line: " "${LINENO}" ;;
+            esac
+        ;;
+        "-d"|"--description"    ) description="${2}"
+            # Make sure that the symbol is `-` and not `--` for the argument is not present or empty.
+            # If the argument is empty or not present, exit with error message.
+            if test -z "${2}" || test "${2:0:1}" = "-" ; then error_message "No description given." " line: " "${LINENO}" ; fi
+            description="${2}"
+        ;;
+        "-l"|"--lifespan"       )
+            # If the argument is empty or a `-` or `--` symbol is present then set the lifespan to the default,
+            # otherwise set the lifespan to the argument given.
+            if test -z "${2}" || test "${2:0:1}" = "-" ; then lifespan="${SNAPSHOT_LIFESPAN}" ; else lifespan="${2}" ; fi
+        ;;
+        "-k"|"--keep"           ) keep="true"                                                   ;;
+        "-r"|"--readonly"       ) read_only="0"
+        ;;
+        "-s"|"--subvolume"      )
+            subvolume="${2}"
+
+            # Read the last directory after `/` in the path and set that as the subvolume name.
+            # If the subvolume is empty then it is the root subvolume and that is
+            dir_name="$(echo "${subvolume}" | rev | cut -d'/' -f1 | rev)"
+
+        ;;
+        "-p"|"--prefix"         ) prefix="${2}"                                                 ;;
+        "-h"|"--help"           ) echo "${helpCreateInfo}" ; exit 0                             ;;
+        *                       ) ;;
+    esac ; if test -n "${2}" ; then shift ; else break ; fi ; done
+
+    # If no subvolume is given as parameter, use the default root subvolume.
+    if test -z "${subvolume}" ; then subvolume="${SNAPSHOT_SUBVOLUME}" ; fi
+
+    # If no directory name is given as parameter, use the default root subvolume.
+    if test -z "${dir_name}" ; then dir_name="${SNAPSHOT_DIRECTORY}" ; fi
+
+    # If no prefix is given as parameter, use the default prefix.
+    if test -z "${prefix}" ; then prefix="${SNAPSHOT_HOSTNAME}" ; fi
+
+    # If no lifespan is given as parameter, use the default lifespan.
+    if test -z "${lifespan}" ; then lifespan="${SNAPSHOT_LIFESPAN}" ; fi
+
+    # If no description is given as parameter, use the default description.
+    if test -z "${description}" ; then description="${SNAPSHOT_DESCRIPTION}" ; fi
+
+    # If no tag is given as parameter, use the default tag.
+    if test -z "${tag}" ; then tag="${SNAPSHOT_TAG}" ; fi
+
+    # Set to false if keep is not set.
+    if test -z "${keep}" ; then keep="false" ; fi
+
+    # Check that the lifespan variable is not empty, if so then set the lifespan to the default
+    # lifespan from the config file.
+    if test -z "${lifespan}" ; then lifespan="${SNAPSHOT_LIFETIME}" ; fi
+
+    lifespan=$(date '+%Y-%-m-%d' -d "${end_date}+${lifespan} days")
+
+    # Check if the `-k` or `--keep` and `-l` or `--lifespan` options are used together.
+    # if so exit with error message.
+    if test -n "${lifespan}" && test "${keep}" = "true" ; then
+        error_message "The -k or --keep and -l or --lifespan options cannot be used together." " line: " "${LINENO}"
+    fi
+
+    # Need to set the read_only variable to true if the variable to 0 if not set.
+    if test -z "${read_only}" ; then read_only="0" ; fi
+
+    # Create the snapshot using the btrfs command setting the type to the default type if read_only is not set
+    # or set to 0, otherwise create rw snapshot.
+    if test "${read_only}" -eq "0" || test -z "{read_only}" ; then
+        read_only="true"
+        btrfs subvolume snapshot -r "${subvolume}" "/.snapshots/${prefix}_${dir_name}_${date_time}" > /dev/null
+    else
+        read_only="false"
+        btrfs subvolume snapshot "${subvolume}" "/.snapshots/${prefix}_${dir_name}_${date_time}" > /dev/null
+    fi
+
+    # Log the action to /var/log/btrfs-manager.log
+    echo -e "- $(date)  - Snapshot of ${subvolume} created on ${date_time}." >> /var/log/btrfs-manager.log
+
+    # Create the snapshot yaml file in /.snapshots/${prefix}-${dir_name}_${date_time}.yaml
+    cat <<EOF > "/.snapshots/${prefix}-${dir_name}_${date_time}.yaml"
+# Snapshot of ${subvolume} created on ${date_time}
+name: ${prefix}-${dir_name}_${date_time}
+subvolume: ${subvolume}
+description: ${description}
+lifespan: ${lifespan}
+keep: ${keep}
+read_only: ${read_only}
+tag: ${tag}
+EOF
+
+    # Call the function log_message to log the action to /var/log/btrfs-manager.log
+    log_message "Snapshot of ${subvolume} created "
+
+    # Exit with exit code 0
+    exit 0
 
 }
 
@@ -88,18 +245,15 @@ ${verInfo}
 EOF
 )"
 
-# Source config file
-source /etc/btrfs-manager.conf
+
 
 # Use while loop to process all commands, options with arguments and options without within the case statement.
 # After case statement use check if next parameter is empty, if not empty shift otherwise break.
 while true ; do case "${1}" in
-    "create"                ) check_root ; create_snapshot "${@}" ;;
-    "restore"               ) check_root ; restore_snapshot "${@}" ;;
-    "list"                  ) check_root ; list_snapshots "${@}" ;;
+    "create"                ) create_snapshot "${@}" ;;
+    "restore"               ) restore_snapshot "${@}" ;;
+    "list"                  ) list_snapshots "${@}" ;;
     "add"                   )
-        check_root
-
         # Check if btrfs-menu is installed in /etc/grub.d/50add-btrfs-menu
         if [ ! -f /etc/grub.d/50add-btrfs-menu ]; then
             error_message "50_btrfs-menu is not installed, please install it first!" " line: " "${LINENO}"
