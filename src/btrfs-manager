@@ -196,6 +196,7 @@ EOF
     cat <<EOF > "/.snapshots/${prefix}-${dir_name}_${date_time}.yaml"
 # Snapshot of ${subvolume} created on ${date_time}
 name: ${prefix}-${dir_name}_${date_time}
+date: $(date)
 subvolume: ${subvolume}
 description: ${description}
 lifespan: ${lifespan}
@@ -209,6 +210,87 @@ EOF
 
     # Exit with exit code 0
     exit 0
+
+}
+
+# Restore snapshot function, takes a snapshot as parameter and restores it. If no snapshot is given as
+# assume the last snapshot and restore it. Use the yaml file of the snapshot to set the variables for
+# the snapshots restore location.
+function restore_snapshot() {
+
+    # Source the config file in either src/etc/btrfs-manager.conf or /etc/btrfs-manager.conf
+    # If the config file does not exist, exit with error message.
+    source /etc/btrfs-manager.conf || source src/etc/btrfs-manager.conf ||
+        error_message "Config file not found, please reinstall btrfs-manager." " line: " "${LINENO}"
+
+    # Need to help text for restore command
+    helpRestoreInfo="$(cat <<EOF
+Usage: btrfs-manager restore [OPTIONS]
+Usage: btrfs-manager restore [OPTIONS] [SNAPSHOT]
+
+The following options are available for the restore command: Please note that the restore command
+requires root privileges to function.
+
+Options:
+    -s, --snapshot      Set the snapshot to be restored.
+    -h, --help          Display help text for a given command.
+
+${verInfo}
+EOF
+)"
+
+    # If the first parameter is `-h` or `--help` then display the help text and exit with exit code 0,
+    # otherwise check for root access and exit with error message if not root.
+    if test "${1}" = "-h" || test "${1}" = "--help" ; then echo "${helpRestoreInfo}" ; exit 0 ; else check_root ; fi
+
+    # Using a case statement to set the snapshot to be restored, if no snapshot is given as parameter then
+    # assume the most recent snapshot of the root subvolume is to be restored.
+    case "${1}" in
+        "-s"|"--snapshot"   ) snapshot="${2}" ;;
+        *                   )
+            # Using the name of the `yaml` file to get the name of the most recent snapshot by reading the date
+            # the file was created and sorting by date, then using the first line of the output.
+            snapshot="$(ls -t /.snapshots/*.yaml | head -n1 | cut -d'/' -f3 | cut -d'.' -f1)"
+
+            # If no snapshot `yaml` file is found, exit with error message.
+            if test -z "${snapshot}" ; then
+                error_message "No snapshot found matching ${progName} formatting!" " line: " "${LINENO}"
+            fi
+
+        ;;
+    esac
+
+    # Echo the snapshot to be restored to the log file and stdout.
+
+    # Reading the `yaml` file of the snapshot of the subvolume to be restored and setting the variables
+    # for the subvolume only since that is the destination of the restore.
+    while read -r line ; do
+        case "${line}" in
+            "subvolume:"*   ) subvolume="$(echo "${line}" | cut -d' ' -f2)" ;;
+        esac
+    done < "/.snapshots/${snapshot}.yaml"
+
+    # Delete the subvolume to be restored first, then restore the snapshot.
+    btrfs subvolume delete "${subvolume}" > /dev/null
+
+    # Add to log file and stdout if the subvolume was deleted successfully.
+    if test "${?}" -eq "0" ; then
+        echo -e "- $(date)  - Subvolume ${subvolume} deleted." >> /var/log/btrfs-manager.log
+        echo -e "Subvolume ${subvolume} deleted."
+    else
+        error_message "Subvolume ${subvolume} could not be deleted." " line: " "${LINENO}"
+    fi
+
+    # Restore the snapshot using the btrfs command with top level of 5.
+    btrfs subvolume snapshot "/.snapshots/${snapshot}" "${subvolume}" > /dev/null
+
+    # Add to log file and stdout if the snapshot was restored successfully.
+    if test "${?}" -eq "0" ; then
+        echo -e "- $(date)  - Snapshot ${snapshot} restored to ${subvolume}." >> /var/log/btrfs-manager.log
+        echo -e "Snapshot ${snapshot} restored to ${subvolume}."
+    else
+        error_message "Snapshot ${snapshot} could not be restored to ${subvolume}." " line: " "${LINENO}"
+    fi
 
 }
 
